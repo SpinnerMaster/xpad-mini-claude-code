@@ -1,14 +1,25 @@
 import { ClaudeState, KeyId, KeyRoles, StateStyle } from '../../shared/types';
 import { Rgb, XpadProtocol } from './protocol';
 
-const BACKLIGHT_COUNT = 10;
-const KEY_COUNT = 3;
 const FPS = 30;
-const KEY_ORDER: KeyId[] = ['left', 'center', 'right'];
+
+/**
+ * Physical LED layout, calibrated against the device with the user's eyes
+ * (2026-07-19). Device indexes: 0,1,2 = key LEDs left/center/right;
+ * 3..12 = light bar running RIGHT -> LEFT (3 = right end, 12 = left end).
+ * NOT the layout the firmware docs suggested — trust this, it was verified
+ * by lighting individual indexes. See docs/PROTOCOL.md.
+ */
+const KEY_LED: Record<KeyId, number> = { left: 0, center: 1, right: 2 };
+/** Bar device indexes ordered left -> right as the user sees them. */
+const BAR: number[] = [12, 11, 10, 9, 8, 7, 6, 5, 4, 3];
+/** Clockwise ring: bar left -> right, then keys right -> left, and around. */
+const RING: number[] = [...BAR, KEY_LED.right, KEY_LED.center, KEY_LED.left];
 
 const BLACK: Rgb = { r: 0, g: 0, b: 0 };
 const APPROVE_GREEN: Rgb = { r: 0, g: 255, b: 0 };
-const REJECT_RED: Rgb = { r: 255, g: 0, b: 0 };
+// Post-gamma target ~(255,40,0): these LEDs read green-strong, more G looks yellow.
+const REJECT_ORANGE: Rgb = { r: 255, g: 110, b: 0 };
 const DICTATION_GLOW: Rgb = { r: 0x8c, g: 0xb4, b: 0xff }; // neutral blue-white
 
 function hexToRgb(hex: string): Rgb {
@@ -43,13 +54,25 @@ function gammaCorrect(c: Rgb): Rgb {
 }
 
 /**
- * The 13 LEDs as a physical ring: backlight strip left -> right, then key
- * LEDs right -> center -> left, closing the loop back at the strip's start.
+ * Base glow for the bar during working/building. The bar sits behind a
+ * diffuser and runs much dimmer than the key LEDs (5% PWM proved invisible
+ * on hardware), so "dim glow" needs ~17% duty post-gamma.
  */
-const RING_ORDER = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 11, 10];
+const BAR_BASE = Math.pow(0.17, 1 / GAMMA);
+/** Key LEDs are bright and unlidded; a much lower duty reads the same. */
+const KEY_BASE = Math.pow(0.06, 1 / GAMMA);
 
-/** Pre-gamma level that lands at ~5% output after gamma (0.05 would round to 0). */
-const ORBIT_BASE = Math.pow(0.05, 1 / GAMMA);
+/**
+ * Symmetric constant-energy dot: full brightness at the dot's fractional
+ * position, quadratic falloff over `width` LEDs on both sides — the peak
+ * glides instead of pulsing as it crosses LED boundaries.
+ */
+function dotLevel(dist: number, width = 2): number {
+  const d = Math.abs(dist);
+  if (d >= width) return 0;
+  const f = 1 - d / width;
+  return f * f;
+}
 
 /**
  * Renders the current Claude state as LED animation frames at 30 Hz and hands
@@ -120,50 +143,49 @@ export class LedEngine {
       return;
     }
 
-    let backlight: Rgb[];
+    const out: Rgb[] = Array(13).fill(BLACK);
+    const fillBar = (c: Rgb) => {
+      for (const idx of BAR) out[idx] = c;
+    };
     let brightness = 1;
 
     switch (style.effect) {
       case 'off':
-        backlight = Array(BACKLIGHT_COUNT).fill(BLACK);
         brightness = 0;
         break;
       case 'steady':
-        backlight = Array(BACKLIGHT_COUNT).fill(color);
+        fillBar(color);
         break;
       case 'pulse': {
         brightness = 0.02 + 0.98 * (0.5 + 0.5 * Math.sin(t * Math.PI)); // ~0.5 Hz breathe
-        backlight = Array(BACKLIGHT_COUNT).fill(scale(color, brightness));
+        fillBar(scale(color, brightness));
         break;
       }
       case 'flash': {
         brightness = Math.floor(t * 4) % 2 === 0 ? 1 : 0; // 2 Hz
-        backlight = Array(BACKLIGHT_COUNT).fill(scale(color, brightness));
+        fillBar(scale(color, brightness));
         break;
       }
       case 'scan': {
-        // Dot sweeping left -> right with a fading tail. No wrap: the dot and
-        // its tail run off the right edge, then the sweep restarts at left.
-        const speed = 12; // LEDs per second
-        const span = BACKLIGHT_COUNT + 4; // let the tail fully exit
-        const pos = (t * speed) % span;
-        backlight = Array.from({ length: BACKLIGHT_COUNT }, (_, i) => {
-          const dist = pos - i;
-          if (dist < 0) return BLACK; // nothing ahead of the dot
-          const f = Math.max(0, 1 - dist / 4);
-          return scale(color, f * f);
-        });
-        // Keys glow softly while scanning (post-gamma this is a faint tint).
-        brightness = 0.25;
+        // Smooth dot gliding left -> right over a dim base, wrapping
+        // seamlessly (circular distance): it re-enters on the left as it
+        // exits on the right, so the motion never stalls.
+        const speed = 8; // LEDs per second
+        const n = BAR.length;
+        const pos = (t * speed) % n;
+        for (let i = 0; i < n; i++) {
+          const lin = Math.abs(pos - i);
+          const dist = Math.min(lin, n - lin);
+          const level = Math.max(BAR_BASE, dotLevel(dist));
+          out[BAR[i]] = scale(color, level);
+        }
+        brightness = KEY_BASE; // keys hold a faint tint while working
         break;
       }
     }
 
-    const keys = this.renderKeys(style, color, brightness);
-    this.protocol.setLeds(
-      backlight.map((c) => this.output(c)),
-      keys.map((c) => this.output(c))
-    );
+    this.applyKeys(out, color, brightness);
+    this.protocol.setLeds(out.map((c) => this.output(c)));
   }
 
   /** Final output step: global brightness, then gamma. */
@@ -172,47 +194,48 @@ export class LedEngine {
   }
 
   /**
-   * 'building' overlay: every LED holds a ~5% base glow while a full-bright
-   * dot with a short tail orbits the RING_ORDER loop.
+   * 'building' overlay: the whole ring holds a dim base glow while a
+   * full-bright dot glides around it (bar left -> right, then the keys
+   * right -> left, and around again).
    */
   private renderOrbit(t: number, color: Rgb): void {
     const speed = 8; // ring positions per second (~1.6 s per lap)
-    const n = RING_ORDER.length;
+    const n = RING.length;
     const pos = (t * speed) % n;
-    const levels = new Array<number>(n).fill(ORBIT_BASE);
+    const out: Rgb[] = Array(13).fill(BLACK);
     for (let slot = 0; slot < n; slot++) {
-      const dist = (pos - slot + n) % n; // how far this LED trails the dot
-      if (dist < 2) {
-        const f = (1 - dist / 2) ** 2;
-        levels[RING_ORDER[slot]] = Math.max(ORBIT_BASE, f);
-      }
+      const lin = Math.abs(pos - slot);
+      const dist = Math.min(lin, n - lin); // circular distance to the dot
+      const idx = RING[slot];
+      const isKey = idx < 3;
+      // Key LEDs are far brighter than the diffused bar; damp them so the
+      // dot reads as one continuous brightness around the loop.
+      const level = Math.max(isKey ? KEY_BASE : BAR_BASE, dotLevel(dist) * (isKey ? 0.5 : 1));
+      out[idx] = scale(color, level);
     }
-    const all = levels.map((f) => this.output(scale(color, f)));
-    this.protocol.setLeds(all.slice(0, BACKLIGHT_COUNT), all.slice(BACKLIGHT_COUNT));
+    this.protocol.setLeds(out.map((c) => this.output(c)));
   }
 
   /**
-   * Key LEDs are role-aware:
-   *  - attention: approve key solid green, reject key solid red (steady while
-   *    the strip flashes), dictation key dark
+   * Role-aware key LEDs, written into the flat device array:
+   *  - attention: approve key solid green, reject key solid orange (steady
+   *    while the bar flashes), others dark
    *  - idle: dictation key glows blue-white so it's findable, rest dark
    *  - other states: keys follow the effect brightness/color
    */
-  private renderKeys(style: StateStyle, color: Rgb, brightness: number): Rgb[] {
+  private applyKeys(out: Rgb[], color: Rgb, brightness: number): void {
     if (this.state === 'attention') {
-      return KEY_ORDER.map((keyId) => {
-        if (keyId === this.keyRoles.approve) return APPROVE_GREEN;
-        if (keyId === this.keyRoles.reject) return REJECT_RED;
-        return BLACK;
-      });
+      if (this.keyRoles.approve) out[KEY_LED[this.keyRoles.approve]] = APPROVE_GREEN;
+      if (this.keyRoles.reject) out[KEY_LED[this.keyRoles.reject]] = REJECT_ORANGE;
+      return;
     }
     if (this.state === 'idle') {
-      return KEY_ORDER.map((keyId) =>
-        keyId === this.keyRoles.dictation ? DICTATION_GLOW : BLACK
-      );
+      if (this.keyRoles.dictation) out[KEY_LED[this.keyRoles.dictation]] = DICTATION_GLOW;
+      return;
     }
-    return Array(KEY_COUNT).fill(
-      style.effect === 'off' ? BLACK : scale(color, brightness)
-    );
+    const c = scale(color, brightness);
+    for (const keyId of ['left', 'center', 'right'] as KeyId[]) {
+      out[KEY_LED[keyId]] = c;
+    }
   }
 }

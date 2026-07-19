@@ -167,8 +167,16 @@ if (!gotLock) {
     tray = new Tray(trayIconFor('idle'));
     tray.on('double-click', () => openSettingsWindow());
 
+    // Shared per-user art dir (fixed name on purpose: dev and packaged apps
+    // have different userData names, but must read the same imported art).
+    const externalArtDir = path.join(
+      app.getPath('appData'),
+      'xpad-mini-claude-code',
+      'clawd-external'
+    );
     deviceHost.start(
       assetPath(),
+      externalArtDir,
       config.states,
       deriveKeyRoles(config.keys),
       config.ledBrightness

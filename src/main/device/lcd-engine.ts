@@ -86,14 +86,19 @@ export class LcdEngine {
 
   constructor(
     private protocol: XpadProtocol,
-    private assetRoot: string
+    private assetRoot: string,
+    /** Per-user art dir that survives app reinstalls (imported pixel art). */
+    private externalDir: string
   ) {}
 
   loadAssets(): void {
     this.animations.clear();
-    // Procedural fallback set first, external set second so it overrides.
+    // Procedural fallback first; external sets override. The shared per-user
+    // dir loads last: it survives reinstalls (installer builds ship without
+    // the fan art, so this is where imported art actually lives).
     this.loadDir(path.join(this.assetRoot, 'clawd'));
     this.loadDir(path.join(this.assetRoot, 'clawd-external'));
+    this.loadDir(this.externalDir);
     this.workingPool = ROLE_ANIMATIONS.working.filter((a) => this.animations.has(a));
     // Don't mix the procedural 'working' into a rotation with external anims.
     if (this.workingPool.length > 1) {

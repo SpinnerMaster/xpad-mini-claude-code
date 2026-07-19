@@ -1,6 +1,6 @@
 {
   "name": "xpad-mini-claude-code",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Pulsar Lab XPAD Mini companion for Claude Code — LED status, LCD Clawd animations, and approve/reject keys",
   "main": "./out/main/index.js",
   "author": "SpinnerMaster",

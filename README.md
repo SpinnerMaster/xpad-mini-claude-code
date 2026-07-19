@@ -55,9 +55,12 @@ node tools/import-clawd-gifs.js
 ```
 
 This downloads the GIFs and converts them into `assets/clawd-external/`
-(gitignored). **That artwork is All-Rights-Reserved fan art of Anthropic's
-Clawd** — it is imported locally for personal use only and must never be
-committed or redistributed with this project. Without the import, the app uses
+(gitignored) and into a per-user directory (`%APPDATA%\xpad-mini-claude-code\
+clawd-external` on Windows, `~/Library/Application Support/xpad-mini-claude-code/
+clawd-external` on macOS) that installed builds read too — so the import
+survives app updates and reinstalls. **That artwork is All-Rights-Reserved
+fan art of Anthropic's Clawd** — it is imported locally for personal use only
+and must never be committed or redistributed with this project. Without the import, the app uses
 its built-in (original, committed) procedural animations. Note that a locally
 built installer (`npm run dist`) bundles `assets/` — including the imported
 art — so never share locally built installers; the CI/release builds contain

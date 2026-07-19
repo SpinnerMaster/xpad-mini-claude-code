@@ -38,8 +38,9 @@ export interface WorkerOutMessage {
 const port = parentPort;
 if (!port) throw new Error('device-worker must run in a worker thread');
 
-const { assetRoot, states, keyRoles, ledBrightness } = workerData as {
+const { assetRoot, externalDir, states, keyRoles, ledBrightness } = workerData as {
   assetRoot: string;
+  externalDir: string;
   states: Record<ClaudeState, StateStyle>;
   keyRoles: KeyRoles;
   ledBrightness: number;
@@ -48,7 +49,7 @@ const { assetRoot, states, keyRoles, ledBrightness } = workerData as {
 const device = new XpadDevice();
 const protocol = new XpadProtocol(device);
 const ledEngine = new LedEngine(protocol, states);
-const lcdEngine = new LcdEngine(protocol, assetRoot);
+const lcdEngine = new LcdEngine(protocol, assetRoot, externalDir);
 
 ledEngine.setKeyRoles(keyRoles);
 ledEngine.setBrightness(ledBrightness);
@@ -106,7 +107,7 @@ async function shutdown(): Promise<void> {
   lcdEngine.stop();
   try {
     const black = { r: 0, g: 0, b: 0 };
-    protocol.setLeds(Array(BACKLIGHT_COUNT).fill(black), Array(KEY_LED_COUNT).fill(black));
+    protocol.setLeds(Array(BACKLIGHT_COUNT + KEY_LED_COUNT).fill(black));
     await protocol.drawLcdFrame(Buffer.alloc(LCD_WIDTH * LCD_HEIGHT * 2));
   } catch {
     // Device may already be gone; dark hand-off is best-effort.

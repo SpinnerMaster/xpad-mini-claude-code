@@ -17,12 +17,13 @@ export class DeviceHost extends EventEmitter {
 
   start(
     assetRoot: string,
+    externalDir: string,
     states: Record<ClaudeState, StateStyle>,
     keyRoles: KeyRoles,
     ledBrightness: number
   ): void {
     this.worker = new Worker(path.join(__dirname, 'device-worker.js'), {
-      workerData: { assetRoot, states, keyRoles, ledBrightness },
+      workerData: { assetRoot, externalDir, states, keyRoles, ledBrightness },
     });
     this.worker.on('message', (msg: WorkerOutMessage) => {
       if (msg.type === 'status') {

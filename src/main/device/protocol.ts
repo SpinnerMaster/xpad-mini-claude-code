@@ -78,17 +78,18 @@ export class XpadProtocol {
   }
 
   /**
-   * Set all LEDs for one animation frame via cmd 0x27.
-   * @param backlight 10 colors, physical order left -> right (indexes 0-9)
-   * @param keys 3 colors: left, center, right (indexes 10-12)
+   * Set all 13 LEDs for one animation frame via cmd 0x27.
+   * The payload must be exactly 13 entries (52 bytes) — the firmware rejects
+   * other lengths outright.
+   * @param colors 13 colors by DEVICE index: 0-2 key LEDs left/center/right,
+   *   3-12 light bar right -> left (see docs/PROTOCOL.md, calibrated layout)
    */
-  setLeds(backlight: Rgb[], keys: Rgb[]): void {
+  setLeds(colors: Rgb[]): void {
     const dev = this.device.bulk;
     if (!dev) return;
     const payload = Buffer.alloc(LED_TOTAL * 4);
-    const all = [...backlight, ...keys];
     for (let i = 0; i < LED_TOTAL; i++) {
-      const c = all[i] ?? { r: 0, g: 0, b: 0 };
+      const c = colors[i] ?? { r: 0, g: 0, b: 0 };
       payload[i * 4] = c.r;
       payload[i * 4 + 1] = c.g;
       payload[i * 4 + 2] = c.b;
@@ -116,7 +117,6 @@ export class XpadProtocol {
     const force = this.lastFrame === null || this.framesUntilFull <= 0;
     this.framesUntilFull = force ? 30 : this.framesUntilFull - 1;
 
-    let sentInBatch = 0;
     for (let off = 0; off < rgb565.length; off += chunk) {
       const n = Math.min(chunk, rgb565.length - off);
       if (
@@ -133,10 +133,10 @@ export class XpadProtocol {
         this.lastFrame = null; // force a clean full frame after errors
         return;
       }
-      // Yield between small groups of blocking writes.
-      if (++sentInBatch % 6 === 0) {
-        await new Promise<void>((resolve) => setImmediate(resolve));
-      }
+      // Yield after every blocking write: a busy frame is ~65 of them, and
+      // the 30 Hz LED ticker must keep its cadence in between (visible LED
+      // stutter otherwise).
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
     this.lastFrame = rgb565;
   }

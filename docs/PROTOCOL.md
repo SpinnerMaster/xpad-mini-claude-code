@@ -19,7 +19,12 @@ Status: **verified against the live device** (2026-07-18). The XPAD Mini runs
 
 - VID `0x3710`, PID `0x2507`, product "Pulsar Lab Xpad Mini", model code `0x23` (35)
 - LCD: **240 × 135**, RGB565 little-endian, 60 Hz (firmware-reported; marketing says 136)
-- LEDs: **13 addressable** — indexes 0–9 backlight strip left→right, 10–12 key LEDs (left, center, right)
+- LEDs: **13 addressable** — **indexes 0–2 are the key LEDs (left, center,
+  right); indexes 3–12 are the light bar running RIGHT→LEFT** (3 = right end,
+  12 = left end). Calibrated visually 2026-07-19 by lighting individual
+  indexes — an earlier version of this doc had it backwards. The bar sits
+  behind a diffuser and is much dimmer than the key LEDs (~5% duty is
+  invisible on the bar; ~17% reads as a subtle glow).
 
 ## HID channels
 
@@ -75,7 +80,9 @@ Verified: 240×135@60, vid 0x3710, pid 0x2507.
 - **Read**: empty payload → 52-byte payload: 13 × `[R, G, B, 0]`.
 - **Write**: 52-byte payload, same layout → sets all 13 LEDs instantly and
   suppresses the firmware's own effect until reboot/profile switch.
-  Order: 0–9 backlight left→right, 10–12 keys left/center/right.
+  Order: 0–2 keys left/center/right, 3–12 bar right→left (see Device
+  identity above). **The payload must be exactly 13 entries — writes with
+  more entries (e.g. 16) are rejected outright and change nothing.**
 
 ### Others (observed, not needed by this app)
 - 0x03 Setting (read: 40-byte config blob)

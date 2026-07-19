@@ -29,7 +29,7 @@ const ANIMS = [
   'react-double-jump',
 ];
 
-const RAW_BASE = 'https://raw.githubusercontent.com/KebeliSamet0/clawd/main/assets/gif';
+const RAW_BASE = 'https://raw.githubusercontent.com/KebeliSamet0/clawd/master/assets/gif';
 
 async function getGif(name) {
   const local = process.argv[2];
@@ -171,10 +171,31 @@ async function importAnim(name) {
   console.log(`${name}: ${gif.numFrames()} frames (${targetW}x${targetH})`);
 }
 
+/**
+ * Shared per-user art dir, read by both the dev app and installed builds
+ * (deliberately a fixed name — dev and packaged apps have different
+ * userData names). Lives outside the install dir so app updates keep it.
+ */
+function sharedDir() {
+  const base =
+    process.platform === 'win32'
+      ? process.env.APPDATA
+      : process.platform === 'darwin'
+        ? path.join(process.env.HOME, 'Library', 'Application Support')
+        : process.env.XDG_CONFIG_HOME || path.join(process.env.HOME, '.config');
+  return path.join(base, 'xpad-mini-claude-code', 'clawd-external');
+}
+
 (async () => {
   for (const name of ANIMS) {
     await importAnim(name);
   }
-  console.log('\nDone. Frames are in assets/clawd-external/ (gitignored — the');
-  console.log('artwork is All-Rights-Reserved fan art and must not be committed).');
+  const repoDir = path.join(__dirname, '..', 'assets', 'clawd-external');
+  const shared = sharedDir();
+  fs.rmSync(shared, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(shared), { recursive: true });
+  fs.cpSync(repoDir, shared, { recursive: true });
+  console.log(`\nDone. Frames are in assets/clawd-external/ and ${shared}`);
+  console.log('(gitignored / local-only — the artwork is All-Rights-Reserved');
+  console.log('fan art and must not be committed or redistributed).');
 })();
