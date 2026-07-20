@@ -81,8 +81,6 @@ export class LcdEngine {
   private workingPool: string[] = [];
   private workingPoolIndex = -1;
   private workingRotatedAt = 0;
-  private animListener: ((name: string) => void) | null = null;
-  private lastAnnounced = '';
 
   constructor(
     private protocol: XpadProtocol,
@@ -178,15 +176,6 @@ export class LcdEngine {
     this.reschedule();
   }
 
-  /**
-   * Called whenever the animation actually being shown changes (state change,
-   * one-shot start/end, working-pool rotation). Lets the LED engine react to
-   * specific animations, e.g. the orbit effect while 'building' plays.
-   */
-  setAnimationListener(cb: (name: string) => void): void {
-    this.animListener = cb;
-  }
-
   /** Play a key-press reaction, then fall back to the state animation. */
   playOneShot(role: Extract<ClawdRole, 'approve' | 'reject' | 'dictation'>): void {
     this.oneShot = { anim: this.resolve(role), until: Date.now() + ONESHOT_MS };
@@ -234,10 +223,6 @@ export class LcdEngine {
     const tick = async () => {
       if (myEpoch !== this.epoch) return;
       const name = this.activeAnimation();
-      if (name !== this.lastAnnounced) {
-        this.lastAnnounced = name;
-        this.animListener?.(name);
-      }
       const anim = this.animations.get(name);
       if (anim) {
         const idx = this.frameIndex % anim.frames.length;

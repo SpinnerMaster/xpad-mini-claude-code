@@ -92,7 +92,6 @@ export class LedEngine {
   private state: ClaudeState = 'idle';
   private styles: Record<ClaudeState, StateStyle>;
   private keyRoles: KeyRoles = {};
-  private overlay: 'orbit' | null = null;
   private brightness = 1;
 
   constructor(
@@ -108,11 +107,6 @@ export class LedEngine {
 
   setKeyRoles(roles: KeyRoles): void {
     this.keyRoles = roles;
-  }
-
-  /** Driven by the LCD engine's active animation (e.g. 'building' -> orbit). */
-  setOverlay(overlay: 'orbit' | null): void {
-    this.overlay = overlay;
   }
 
   setBrightness(brightness: number): void {
@@ -141,16 +135,12 @@ export class LedEngine {
     const t = (Date.now() - this.startedAt) / 1000;
     const color = hexToRgb(style.color);
 
-    if (this.overlay === 'orbit' && this.state === 'working') {
-      this.renderOrbit(t, color);
-      return;
-    }
-
     const out: Rgb[] = Array(13).fill(BLACK);
     const fillBar = (c: Rgb) => {
       for (const idx of BAR) out[idx] = c;
     };
     let brightness = 1;
+    let keysSetByEffect = false;
 
     switch (style.effect) {
       case 'off':
@@ -170,24 +160,30 @@ export class LedEngine {
         break;
       }
       case 'scan': {
-        // Smooth dot gliding left -> right over a dim base, wrapping
-        // seamlessly (circular distance): it re-enters on the left as it
-        // exits on the right, so the motion never stalls.
-        const speed = 8; // LEDs per second
-        const n = BAR.length;
+        // Smooth dot circling the whole ring — the light bar, then across
+        // the three keys, and back — over a dim base. Circular distance
+        // means the motion never stalls at either end.
+        const speed = 8; // ring positions per second (~1.6 s per lap)
+        const n = RING.length;
         const pos = (t * speed) % n;
-        for (let i = 0; i < n; i++) {
-          const lin = Math.abs(pos - i);
+        for (let slot = 0; slot < n; slot++) {
+          const lin = Math.abs(pos - slot);
           const dist = Math.min(lin, n - lin);
-          const level = Math.max(BAR_BASE, dotLevel(dist));
-          out[BAR[i]] = scale(color, level);
+          const idx = RING[slot];
+          const isKey = idx < 3;
+          const base = isKey ? KEY_BASE : BAR_BASE;
+          // Key LEDs are far brighter than the diffused bar; damp their
+          // peak so the dot reads as one continuous brightness around the
+          // loop instead of flaring when it reaches the keys.
+          const level = Math.max(base, dotLevel(dist) * (isKey ? 0.5 : 1));
+          out[idx] = scale(color, level);
         }
-        brightness = KEY_BASE; // keys hold a faint tint while working
+        keysSetByEffect = true;
         break;
       }
     }
 
-    this.applyKeys(out, color, brightness);
+    this.applyKeys(out, color, brightness, keysSetByEffect);
     this.protocol.setLeds(out.map((c) => this.output(c)));
   }
 
@@ -197,36 +193,19 @@ export class LedEngine {
   }
 
   /**
-   * 'building' overlay: the whole ring holds a dim base glow while a
-   * full-bright dot glides around it (bar left -> right, then the keys
-   * right -> left, and around again).
-   */
-  private renderOrbit(t: number, color: Rgb): void {
-    const speed = 8; // ring positions per second (~1.6 s per lap)
-    const n = RING.length;
-    const pos = (t * speed) % n;
-    const out: Rgb[] = Array(13).fill(BLACK);
-    for (let slot = 0; slot < n; slot++) {
-      const lin = Math.abs(pos - slot);
-      const dist = Math.min(lin, n - lin); // circular distance to the dot
-      const idx = RING[slot];
-      const isKey = idx < 3;
-      // Key LEDs are far brighter than the diffused bar; damp them so the
-      // dot reads as one continuous brightness around the loop.
-      const level = Math.max(isKey ? KEY_BASE : BAR_BASE, dotLevel(dist) * (isKey ? 0.5 : 1));
-      out[idx] = scale(color, level);
-    }
-    this.protocol.setLeds(out.map((c) => this.output(c)));
-  }
-
-  /**
    * Role-aware key LEDs, written into the flat device array:
    *  - attention: approve key solid green, reject key solid orange (steady
    *    while the bar flashes), others dark
    *  - idle: dictation key glows blue-white so it's findable, rest dark
-   *  - other states: keys follow the effect brightness/color
+   *  - scan: keys are already animated as part of the ring (see renderFrame)
+   *  - other effects: keys follow the effect's brightness/color
    */
-  private applyKeys(out: Rgb[], color: Rgb, brightness: number): void {
+  private applyKeys(
+    out: Rgb[],
+    color: Rgb,
+    brightness: number,
+    keysSetByEffect: boolean
+  ): void {
     if (this.state === 'attention') {
       if (this.keyRoles.approve) out[KEY_LED[this.keyRoles.approve]] = APPROVE_GREEN;
       if (this.keyRoles.reject) out[KEY_LED[this.keyRoles.reject]] = REJECT_ORANGE;
@@ -236,6 +215,7 @@ export class LedEngine {
       if (this.keyRoles.dictation) out[KEY_LED[this.keyRoles.dictation]] = DICTATION_GLOW;
       return;
     }
+    if (keysSetByEffect) return;
     const c = scale(color, brightness);
     for (const keyId of ['left', 'center', 'right'] as KeyId[]) {
       out[KEY_LED[keyId]] = c;

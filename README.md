@@ -4,9 +4,9 @@ Turns a [Pulsar Lab XPAD Mini](https://www.pulsar.gg/products/pulsar-lab-xpad-mi
 into a status display and control surface for [Claude Code](https://claude.com/claude-code),
 on Windows and macOS.
 
-- **LEDs mirror Claude's state** — blue scan while the agent works, flashing
-  red when it needs you, pulsing green when it's done, and an orbiting dot
-  around the whole pad while Clawd is in hard-hat "building" mode.
+- **LEDs mirror Claude's state** — a dot circles the light bar and keys
+  while the agent works, flashing red when it needs you, pulsing green when
+  it's done.
 - **Keys** — the app maps the actions straight onto the pad: left types `y`
   (approve), right types `n` (reject), center holds **Left Ctrl+Left Win**
   (Wispr Flow's own Windows push-to-talk default — bind your dictation app

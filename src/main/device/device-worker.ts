@@ -65,10 +65,6 @@ const lcdEngine = new LcdEngine(protocol, assetRoot, externalDir);
 
 ledEngine.setKeyRoles(keyRoles);
 ledEngine.setBrightness(ledBrightness);
-// The LED engine mirrors what Clawd is doing: 'building' gets the orbit.
-lcdEngine.setAnimationListener((name) => {
-  ledEngine.setOverlay(name === 'building' ? 'orbit' : null);
-});
 lcdEngine.loadAssets();
 
 let autoRemap = padAutoRemap;
